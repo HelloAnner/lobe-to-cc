@@ -1,0 +1,116 @@
+{
+  "title": "Claude Code -> Local Anthropic Gateway -> LobeHub",
+  "direction": "DOWN",
+  "nodes": [
+    {
+      "id": "cc",
+      "label": "Claude Code\\n(cc)",
+      "kind": "actor",
+      "tier": 0
+    },
+    {
+      "id": "env",
+      "label": "Env Override\\nANTHROPIC_BASE_URL\\nANTHROPIC_AUTH_TOKEN",
+      "kind": "frontend",
+      "tier": 1
+    },
+    {
+      "id": "gateway",
+      "label": "Local Gateway\\nsrc/gateway.mjs\\n127.0.0.1:8787",
+      "kind": "orchestration",
+      "tier": 2
+    },
+    {
+      "id": "local-auth",
+      "label": "Local Auth Check\\ndata/gateway-config.json",
+      "kind": "service",
+      "tier": 3
+    },
+    {
+      "id": "request-map",
+      "label": "Request Mapping\\nanthropic-to-lobe.mjs",
+      "kind": "backend",
+      "tier": 4
+    },
+    {
+      "id": "session",
+      "label": "Captured Session\\ndata/session.json\\nx-agent-id\\nx-lobe-chat-auth\\nx-topic-id",
+      "kind": "storage",
+      "tier": 4
+    },
+    {
+      "id": "lobe",
+      "label": "LobeHub Upstream\\naichat.fineres.com\\n/webapi/chat/anthropic",
+      "kind": "external",
+      "tier": 5
+    },
+    {
+      "id": "response-map",
+      "label": "SSE Mapping\\nlobe-to-anthropic-stream.mjs",
+      "kind": "backend",
+      "tier": 6
+    },
+    {
+      "id": "anthropic-resp",
+      "label": "Anthropic-Compatible\\nSSE / JSON Response",
+      "kind": "frontend",
+      "tier": 7
+    }
+  ],
+  "edges": [
+    {
+      "from": "cc",
+      "to": "env",
+      "label": "custom base url",
+      "style": "solid"
+    },
+    {
+      "from": "env",
+      "to": "gateway",
+      "label": "HTTP + Bearer",
+      "style": "solid"
+    },
+    {
+      "from": "gateway",
+      "to": "local-auth",
+      "label": "verify token",
+      "style": "solid"
+    },
+    {
+      "from": "local-auth",
+      "to": "request-map",
+      "label": "POST /v1/messages",
+      "style": "solid"
+    },
+    {
+      "from": "request-map",
+      "to": "lobe",
+      "label": "translated payload",
+      "style": "solid"
+    },
+    {
+      "from": "session",
+      "to": "lobe",
+      "label": "session headers",
+      "style": "solid"
+    },
+    {
+      "from": "lobe",
+      "to": "response-map",
+      "label": "Lobe SSE",
+      "style": "solid"
+    },
+    {
+      "from": "response-map",
+      "to": "anthropic-resp",
+      "label": "Anthropic SSE",
+      "style": "solid"
+    },
+    {
+      "from": "anthropic-resp",
+      "to": "cc",
+      "label": "stream reply",
+      "style": "dashed"
+    }
+  ]
+}

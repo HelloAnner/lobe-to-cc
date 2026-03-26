@@ -1,0 +1,16 @@
+# Local runtime data
+data/
+
+# OS files
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.*
+
+# Dependencies
+node_modules/

@@ -1,0 +1,11 @@
+{
+  "name": "lobehub-opus-cli-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "start:gateway": "node src/gateway.mjs",
+    "test": "node --test"
+  }
+}
