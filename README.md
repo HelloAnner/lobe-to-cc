@@ -103,6 +103,14 @@ This will:
 - mount `./data` into `/app/data`
 - print the real Claude Code and curl configuration you should use
 
+If the account file still contains placeholder values, `make start` will also print a first-time setup hint and point you to:
+
+```text
+http://127.0.0.1:8787/admin
+```
+
+Use that page to import a HAR file or edit the account pool before connecting Claude Code.
+
 The startup-related variables live in:
 
 - `.env_example`: versioned template

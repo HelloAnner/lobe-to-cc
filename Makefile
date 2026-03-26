@@ -56,6 +56,12 @@ start: ensure-config
 	@echo ""
 	@echo "Logs:"
 	@echo "  make logs"
+	@echo ""
+	@if grep -q 'replace-with-your-' "$(ACCOUNT_FILE)" 2>/dev/null; then \
+		echo "First-time setup detected:"; \
+		echo "  Open http://$(DOCKER_PUBLISH_HOST):$(DOCKER_PUBLISH_PORT)/admin"; \
+		echo "  Import a HAR file or edit account-pool.toml to finish account setup."; \
+	fi
 
 stop:
 	@docker rm -f $(CONTAINER_NAME) >/dev/null 2>&1 || true
@@ -82,3 +88,8 @@ print-config: ensure-config
 	@echo ""
 	@echo "Debug:"
 	@echo "  curl -H \"X-Api-Key: $(AUTH_TOKEN)\" http://$(DOCKER_PUBLISH_HOST):$(DOCKER_PUBLISH_PORT)/debug/accounts"
+	@echo ""
+	@if grep -q 'replace-with-your-' "$(ACCOUNT_FILE)" 2>/dev/null; then \
+		echo "First-time setup:"; \
+		echo "  Open http://$(DOCKER_PUBLISH_HOST):$(DOCKER_PUBLISH_PORT)/admin"; \
+	fi
