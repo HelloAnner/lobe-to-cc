@@ -7,15 +7,8 @@ import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 
 import { saveJsonFile } from '../lib/json-store.mjs';
-import { upsertAccountSessionInToml } from '../lib/account-pool-manager.mjs';
-
-function findAnthropicRequest(entries) {
-  return entries.find((entry) => entry.request.url.includes('/webapi/chat/anthropic'));
-}
-
-function findHeader(request, headerName) {
-  return request.headers.find((header) => header.name === headerName)?.value;
-}
+import { upsertAccountByIdentityInToml } from '../lib/account-pool-manager.mjs';
+import { extractSessionAndIdentityFromHar } from '../lib/har-session-parser.mjs';
 
 async function main() {
   const harPath = process.argv[2] ?? '/Users/anner/Downloads/aichat.fineres.com.har';
@@ -23,21 +16,15 @@ async function main() {
   const outputPath = path.resolve('data/account-pool.toml');
   const content = await readFile(harPath, 'utf8');
   const har = JSON.parse(content);
-  const request = findAnthropicRequest(har.log.entries)?.request;
-
-  if (!request) {
-    throw new Error('HAR 中没有找到 /webapi/chat/anthropic 请求');
-  }
-
-  const session = {
-    xAgentId: findHeader(request, 'x-agent-id'),
-    xLobeChatAuth: findHeader(request, 'x-lobe-chat-auth'),
-    xTopicId: findHeader(request, 'x-topic-id')
-  };
+  const { session, identity } = extractSessionAndIdentityFromHar(har);
 
   try {
     const toml = await readFile(outputPath, 'utf8');
-    const updated = upsertAccountSessionInToml(toml, accountName, session);
+    const updated = upsertAccountByIdentityInToml(toml, {
+      suggestedName: accountName,
+      identity,
+      session
+    });
     await writeFile(outputPath, updated, 'utf8');
     console.log(`session 已写入 ${outputPath} -> account=${accountName}`);
   } catch (error) {

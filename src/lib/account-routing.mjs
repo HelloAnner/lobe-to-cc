@@ -51,13 +51,65 @@ export function isAccountCoolingDown(usageState, accountName, options = {}) {
   return now - failedAt < cooldownMs;
 }
 
+function countRecentRequests(usageState, accountName, now, windowMs) {
+  const timestamps = usageState?.accounts?.[accountName]?.request_timestamps ?? [];
+
+  if (!windowMs || timestamps.length === 0) {
+    return timestamps.length;
+  }
+
+  const nowMs = new Date(now ?? Date.now()).getTime();
+
+  return timestamps.filter((timestamp) => {
+    const value = new Date(timestamp).getTime();
+    return !Number.isNaN(value) && nowMs - value < windowMs;
+  }).length;
+}
+
+export function evaluateAccountAvailability(account, config, usageState, now) {
+  const gateway = config.gateway ?? {};
+  const accountState = usageState?.accounts?.[account.name] ?? {};
+
+  if (isAccountCoolingDown(usageState, account.name, {
+    cooldownMs: gateway.cooldown_ms ?? 0,
+    now
+  })) {
+    return { available: false, reason: 'cooldown' };
+  }
+
+  const minIntervalMs = gateway.min_interval_ms ?? 0;
+
+  if (minIntervalMs && accountState.last_used_at) {
+    const lastUsedAt = new Date(accountState.last_used_at).getTime();
+    const nowMs = new Date(now ?? Date.now()).getTime();
+
+    if (!Number.isNaN(lastUsedAt) && !Number.isNaN(nowMs) && nowMs - lastUsedAt < minIntervalMs) {
+      return { available: false, reason: 'min_interval' };
+    }
+  }
+
+  const maxConcurrent = gateway.max_concurrent_per_account ?? 0;
+
+  if (maxConcurrent && (accountState.active_requests ?? 0) >= maxConcurrent) {
+    return { available: false, reason: 'concurrency' };
+  }
+
+  const maxRequestsPerMinute = gateway.max_requests_per_minute ?? 0;
+
+  if (maxRequestsPerMinute) {
+    const recent = countRecentRequests(usageState, account.name, now, 60 * 1000);
+
+    if (recent >= maxRequestsPerMinute) {
+      return { available: false, reason: 'rate_window' };
+    }
+  }
+
+  return { available: true, reason: null };
+}
+
 function filterAvailableAccounts(config, usageState, now) {
   const accounts = config.accounts ?? [];
-  const cooldownMs = config.gateway?.cooldown_ms ?? 0;
-  const available = accounts.filter((account) => !isAccountCoolingDown(usageState, account.name, {
-    cooldownMs,
-    now
-  }));
+  const available = accounts.filter((account) => evaluateAccountAvailability(account, config, usageState, now).available);
 
   return available.length > 0 ? available : accounts;
 }

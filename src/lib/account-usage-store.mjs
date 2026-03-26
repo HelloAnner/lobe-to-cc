@@ -26,7 +26,9 @@ function ensureAccountState(state, accountName) {
       failed_requests: 0,
       stream_requests: 0,
       non_stream_requests: 0,
+      active_requests: 0,
       consecutive_failures: 0,
+      request_timestamps: [],
       last_used_at: null,
       last_success_at: null,
       last_failure_at: null
@@ -36,12 +38,24 @@ function ensureAccountState(state, accountName) {
   return state.accounts[accountName];
 }
 
+function pruneRequestTimestamps(account, now) {
+  const nowMs = new Date(now).getTime();
+
+  account.request_timestamps = (account.request_timestamps ?? []).filter((timestamp) => {
+    const value = new Date(timestamp).getTime();
+    return !Number.isNaN(value) && nowMs - value < 24 * 60 * 60 * 1000;
+  });
+}
+
 export function recordAccountAttempt(state, accountName, options = {}) {
   const account = ensureAccountState(state, accountName);
   const now = options.now ?? new Date().toISOString();
 
   account.total_requests += 1;
+  account.active_requests += 1;
   account.last_used_at = now;
+  account.request_timestamps.push(now);
+  pruneRequestTimestamps(account, now);
 
   if (options.stream === true) {
     account.stream_requests += 1;
@@ -57,6 +71,8 @@ export function recordAccountAttempt(state, accountName, options = {}) {
 export function recordAccountResult(state, accountName, result, options = {}) {
   const account = ensureAccountState(state, accountName);
   const now = options.now ?? new Date().toISOString();
+  account.active_requests = Math.max(0, (account.active_requests ?? 0) - 1);
+  pruneRequestTimestamps(account, now);
 
   if (result.ok) {
     account.success_requests += 1;

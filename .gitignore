@@ -1,5 +1,6 @@
 # Local runtime data
-data/
+data/*
+!data/account-pool.example.toml
 
 # OS files
 .DS_Store

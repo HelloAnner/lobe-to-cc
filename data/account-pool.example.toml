@@ -1,0 +1,28 @@
+# Example account pool configuration for local development.
+# Copy this file to data/account-pool.toml and replace the placeholder values.
+
+[gateway]
+host = "127.0.0.1"
+port = 8787
+auth_token = "local-dev-token"
+cooldown_ms = 600000
+
+[chat]
+model = "claude-opus-4-6"
+system_prompt = "You are a concise and professional terminal assistant."
+temperature = 1
+top_p = 0.8
+enabled_search = false
+thinking_type = "disabled"
+
+[pool]
+strategy = "least_used"
+active_account = "fineres-primary"
+
+[[accounts]]
+name = "fineres-primary"
+base_url = "https://aichat.fineres.com"
+model = "claude-opus-4-6"
+x_agent_id = "replace-with-your-agent-id"
+x_lobe_chat_auth = "replace-with-your-lobe-chat-auth"
+x_topic_id = "replace-with-your-topic-id"

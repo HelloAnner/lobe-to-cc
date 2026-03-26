@@ -35,14 +35,35 @@ function findAccountBlocks(content) {
 }
 
 function renderAccountBlock(name, session) {
-  return [
+  return renderAccountBlockWithIdentity(name, {}, session);
+}
+
+function renderAccountBlockWithIdentity(name, identity, session) {
+  const lines = [
     '[[accounts]]',
     `name = "${name}"`,
     'base_url = "https://aichat.fineres.com"',
+  ];
+
+  if (identity.email) {
+    lines.push(`email = "${identity.email}"`);
+  }
+
+  if (identity.userId) {
+    lines.push(`user_id = "${identity.userId}"`);
+  }
+
+  if (identity.fullName) {
+    lines.push(`full_name = "${identity.fullName}"`);
+  }
+
+  lines.push(
     `x_agent_id = "${session.xAgentId}"`,
     `x_lobe_chat_auth = "${session.xLobeChatAuth}"`,
     `x_topic_id = "${session.xTopicId}"`
-  ];
+  );
+
+  return lines;
 }
 
 function updateLine(lines, key, value) {
@@ -70,6 +91,60 @@ export function upsertAccountSessionInToml(content, accountName, session) {
   updateLine(blockLines, 'x_topic_id', session.xTopicId);
 
   lines.splice(existing.start, existing.end - existing.start + 1, ...blockLines);
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
+function extractField(blockLines, key) {
+  const line = blockLines.find((item) => item.trim().startsWith(`${key} = `));
+
+  if (!line) {
+    return '';
+  }
+
+  const value = line.split('=').slice(1).join('=').trim();
+  return value.replace(/^"|"$/g, '');
+}
+
+export function upsertAccountByIdentityInToml(content, options) {
+  const { lines, blocks } = findAccountBlocks(content);
+  const identity = options.identity ?? {};
+  const session = options.session;
+  const suggestedName = options.suggestedName ?? 'imported-account';
+
+  const matched = blocks.find((block) => {
+    const blockLines = lines.slice(block.start, block.end + 1);
+    const email = extractField(blockLines, 'email');
+    const userId = extractField(blockLines, 'user_id');
+
+    return (identity.email && email === identity.email)
+      || (identity.userId && userId === identity.userId)
+      || block.name === suggestedName;
+  });
+
+  if (!matched) {
+    const suffix = content.trim() ? '\n\n' : '';
+    return `${content.trimEnd()}${suffix}${renderAccountBlockWithIdentity(suggestedName, identity, session).join('\n')}\n`;
+  }
+
+  const blockLines = lines.slice(matched.start, matched.end + 1);
+
+  if (identity.email) {
+    updateLine(blockLines, 'email', identity.email);
+  }
+
+  if (identity.userId) {
+    updateLine(blockLines, 'user_id', identity.userId);
+  }
+
+  if (identity.fullName) {
+    updateLine(blockLines, 'full_name', identity.fullName);
+  }
+
+  updateLine(blockLines, 'x_agent_id', session.xAgentId);
+  updateLine(blockLines, 'x_lobe_chat_auth', session.xLobeChatAuth);
+  updateLine(blockLines, 'x_topic_id', session.xTopicId);
+
+  lines.splice(matched.start, matched.end - matched.start + 1, ...blockLines);
   return `${lines.join('\n').trimEnd()}\n`;
 }
 

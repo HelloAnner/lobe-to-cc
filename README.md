@@ -1,136 +1,141 @@
-<!--
-功能：介绍项目能力、使用方式、配置结构与 Claude Code 接入链路
-作者：Anner
-创建时间：2026/3/26
--->
-
 # lobe-to-cc
 
-一个用于把 LobeHub 的 `/webapi/chat/anthropic` 会话能力桥接给 Claude Code 和其他 Anthropic 客户端的本地兼容网关。
+> Bridge logged-in LobeHub chat sessions to Claude Code and other Anthropic-compatible clients through a small local gateway.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-0f766e.svg)](./LICENSE)
+[![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-1f6feb.svg)](https://nodejs.org/)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-8b5cf6.svg)](./package.json)
+[![中文文档](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-a16207.svg)](./README.zh-CN.md)
+
+`lobe-to-cc` is a zero-dependency Node.js gateway that exposes Anthropic-style APIs on top of LobeHub's `/webapi/chat/anthropic` endpoint.
+
+It is designed for two practical workflows:
+
+- connect Claude Code to an already authenticated LobeHub session
+- use a lightweight local terminal chat client for multi-turn conversations
 
 > Disclaimer
 >
-> This repository is a technical exploration project for protocol bridging and local tooling experiments.
-> It is not an official integration, not affiliated with LobeHub or Anthropic, and should be evaluated carefully before any production or team-wide use.
+> This repository is a technical exploration of protocol translation, account routing, and local tooling.
+> It is not an official integration, is not affiliated with LobeHub or Anthropic, and should not be treated as a production-grade or supported solution without your own review.
 
-它适合两类场景：
+## Highlights
 
-- 把 Claude Code 接到已经登录的 LobeHub 会话上
-- 在本地终端里直接跑一个轻量的多轮聊天页
+- Anthropic-compatible endpoints: `/v1/models`, `/v1/messages`, `/v1/messages/count_tokens`
+- zero-dependency runtime based only on built-in Node.js modules
+- account pool support with sticky sessions and failover-aware routing
+- routing strategies: `active`, `round_robin`, `failover`, `least_used`
+- HAR-based session import for refreshing browser-derived credentials
+- built-in terminal chat UI for local multi-turn testing
+- usage tracking and account visibility through `/debug/accounts`
 
-项目默认使用 `data/account-pool.toml` 作为统一配置入口，支持账号池、会话粘性、流量分摊和故障切换；旧版 `data/*.json` 配置仍然保留兼容。
-
-## Features
-
-- Anthropic 兼容接口：提供 `/v1/models`、`/v1/messages`、`/v1/messages/count_tokens`
-- 零依赖运行：仅使用 Node.js 内置能力
-- 本地账号池：统一维护网关配置、聊天参数和多个登录态
-- 会话粘性：同一轮对话会尽量固定到同一个账号
-- 路由策略：支持 `active`、`round_robin`、`failover`、`least_used`
-- 使用记录：自动写入 `data/account-usage.json`
-- HAR 导入：可从浏览器导出包中提取最新登录态
-- 本地终端聊天：内置一个简单稳定的多轮 CLI 页面
-
-## Architecture
+## Topology
 
 ```text
 [ Claude Code / Anthropic Client ]
                 |
-                | ANTHROPIC_BASE_URL
-                | ANTHROPIC_AUTH_TOKEN
+                | ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+                | ANTHROPIC_AUTH_TOKEN=local-dev-token
                 v
 [ Local Gateway ]
   src/gateway.mjs
+  127.0.0.1:8787
                 |
-                | read runtime
+                | validate token
+                | load runtime
                 v
 [ data/account-pool.toml ]
-  gateway / chat / pool / accounts
+  [gateway]
+  [chat]
+  [pool]
+  [[accounts]]
                 |
                 | pick account
-                | attach x-agent-id
-                | attach x-lobe-chat-auth
-                | attach x-topic-id
+                | attach session headers
                 v
 [ LobeHub Upstream ]
   https://aichat.fineres.com
   /webapi/chat/anthropic
                 |
-                | translate SSE
+                | Lobe SSE -> Anthropic SSE
                 v
-[ Anthropic-Compatible Response ]
+[ Claude Code / Anthropic Client ]
 ```
 
-独立 ASCII 说明见：[cc-topology-ascii.md](/Users/anner/Downloads/lobehub-api-test-docs/cc-topology-ascii.md)。
+An isolated ASCII note is available in [cc-topology-ascii.md](./cc-topology-ascii.md).
 
 ## Requirements
 
-- Node.js 18 或更高版本
-- 一个可用的 LobeHub 登录态
+- Node.js 18 or newer
+- a valid LobeHub browser session
 
 ## Quick Start
 
-### 1. 准备配置
+### 1. Prepare configuration
 
-项目默认读取 `data/account-pool.toml`。一个最小可用示例如下：
+Use the example file as your starting point:
 
-```toml
-[gateway]
-host = "127.0.0.1"
-port = 8787
-auth_token = "local-dev-token"
-cooldown_ms = 600000
-
-[chat]
-model = "claude-opus-4-6"
-system_prompt = "你是一个简洁、专业的中文终端助手。优先直接回答问题，必要时给出清晰步骤。"
-temperature = 1
-top_p = 0.8
-enabled_search = false
-thinking_type = "disabled"
-
-[pool]
-strategy = "least_used"
-active_account = "fineres-primary"
-
-[[accounts]]
-name = "fineres-primary"
-base_url = "https://aichat.fineres.com"
-model = "claude-opus-4-6"
-x_agent_id = "your-agent-id"
-x_lobe_chat_auth = "your-lobe-chat-auth"
-x_topic_id = "your-topic-id"
+```bash
+cp data/account-pool.example.toml data/account-pool.toml
 ```
 
-### 2. 启动本地聊天页
+Then fill in your real session values:
+
+- `x_agent_id`
+- `x_lobe_chat_auth`
+- `x_topic_id`
+
+The example file is tracked in git. Your real `data/` directory is ignored by default.
+
+### Docker quick start
+
+Run the gateway as a single Docker image with `data/` mounted from the host:
+
+```bash
+cp .env_example .env
+make start
+```
+
+This will:
+
+- build a single local image
+- run one container for the gateway
+- mount `./data` into `/app/data`
+- print the real Claude Code and curl configuration you should use
+
+The startup-related variables live in:
+
+- `.env_example`: versioned template
+- `.env`: local private runtime overrides
+
+### 2. Start the terminal client
 
 ```bash
 npm start
 ```
 
-启动后会进入一个简单的多轮终端会话页。
+Commands:
 
-- 输入普通文本：继续聊天
-- 输入 `/reset`：清空本地历史
-- 输入 `/exit`：退出页面
+- regular text: continue chatting
+- `/reset`: clear local history
+- `/exit`: exit the UI
 
-### 3. 启动 Anthropic 兼容网关
+### 3. Start the local gateway
 
 ```bash
 npm run start:gateway
 ```
 
-默认监听：
+Default local endpoint:
 
 - `http://127.0.0.1:8787`
-- `auth_token = local-dev-token`
 
-支持两种认证头：
+Default local auth:
 
 - `Authorization: Bearer local-dev-token`
 - `X-Api-Key: local-dev-token`
 
-查看账号池与使用状态：
+### 4. Inspect account status
 
 ```bash
 curl -H "X-Api-Key: local-dev-token" http://127.0.0.1:8787/debug/accounts
@@ -138,7 +143,7 @@ curl -H "X-Api-Key: local-dev-token" http://127.0.0.1:8787/debug/accounts
 
 ## Use With Claude Code
 
-启动网关后，Claude Code 可以直接指到本地地址：
+Point Claude Code at the local gateway:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
@@ -146,7 +151,7 @@ export ANTHROPIC_AUTH_TOKEN=local-dev-token
 claude
 ```
 
-快速验证：
+Quick smoke test:
 
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:8787 \
@@ -154,98 +159,79 @@ ANTHROPIC_AUTH_TOKEN=local-dev-token \
 claude -p --model claude-opus-4-6 "Reply with OK"
 ```
 
-为什么这条链路能工作：
+Why this works:
 
-- Claude Code 看到的是一个标准 Anthropic API
-- 本地网关把请求体翻译成 LobeHub 能接受的格式
-- 网关从账号池里取出真实浏览器会话头，代替客户端请求上游
-- 上游返回的 Lobe SSE 会被重新编码成 Anthropic SSE
+- Claude Code sees a standard Anthropic-style API
+- the gateway translates request payloads to the LobeHub upstream format
+- the gateway injects browser-derived session headers from the selected account
+- upstream streaming responses are translated back into Anthropic SSE
 
 ## Import Session From HAR
 
-如果网页重新登录导致 token 变化，可以重新导入 HAR：
+When your browser session changes, refresh the account entry from a HAR file:
 
 ```bash
 node src/tools/extract-session-from-har.mjs /path/to/aichat.fineres.com.har fineres-primary
 ```
 
-这会把最新登录态写回 `data/account-pool.toml` 中对应的账号块。
+This updates the matching account inside `data/account-pool.toml`.
 
-如果 `data/account-pool.toml` 不存在，工具会自动回退写入 `data/session.json`，用于兼容旧版配置。
+If `data/account-pool.toml` does not exist, the tool falls back to the legacy `data/session.json` path for backward compatibility.
 
-## Account Pool
+## Account Pool Routing
 
-`[pool]` 当前支持四种策略：
+Supported strategies:
 
-- `strategy = "active"`：固定使用 `active_account`
-- `strategy = "round_robin"`：按顺序轮询账号
-- `strategy = "failover"`：优先使用未标记失败的账号
-- `strategy = "least_used"`：优先把新会话分给累计请求更少的账号
+- `active`: always use `active_account`
+- `round_robin`: rotate across available accounts
+- `failover`: prefer accounts without recorded failures
+- `least_used`: prefer the account with fewer recorded requests
 
-网关运行时会做两件事：
+Runtime behavior:
 
-- 为同一会话保留账号粘性，避免对话中途切账号
-- 在账号失败时记录状态，并在可用账号之间切换
+- conversations are sticky to a selected account
+- failures are recorded and influence future selection
+- `cooldown_ms` can keep recently failed accounts out of priority selection
+- usage stats are persisted to `data/account-usage.json`
 
-如果目标是降低被感知到的风险，建议优先使用：
+## Configuration Files
 
-```toml
-[pool]
-strategy = "least_used"
-active_account = "fineres-primary"
-```
+### `data/account-pool.example.toml`
 
-这样新会话会尽量均匀分摊到使用次数更少的账号，但同一会话不会中途漂移。
-
-如果某个账号刚失败过，`[gateway]` 里的 `cooldown_ms` 会让它在冷却窗口内暂时不参与优先选择。默认是 `600000`，也就是 10 分钟。
-
-## Configuration Layout
+Versioned example configuration for new setups.
 
 ### `data/account-pool.toml`
 
-统一配置入口，包含：
+Your real local runtime configuration:
 
-- `[gateway]`：监听地址、本地代理 token
-- `[chat]`：默认模型和采样参数
-- `[pool]`：账号选择策略
-- `[[accounts]]`：各账号对应的上游地址和会话头
+- `[gateway]`: local host, port, auth token, cooldown
+- `[chat]`: default model and sampling options
+- `[pool]`: routing strategy and active account
+- `[[accounts]]`: upstream base URL and session headers
 
 ### `data/history.json`
 
-本地终端聊天的多轮历史。
+Multi-turn local chat history for the terminal client.
 
 ### `data/account-usage.json`
 
-账号使用情况记录，网关会自动维护。当前会记录：
+Automatically maintained usage and failure counters.
 
-- `total_requests`
-- `success_requests`
-- `failed_requests`
-- `stream_requests`
-- `non_stream_requests`
-- `consecutive_failures`
-- `last_used_at`
-- `last_success_at`
-- `last_failure_at`
+### Legacy compatibility
 
-### 兼容旧版 JSON
-
-以下文件仍然保留兼容读取：
+Older JSON-based config is still supported:
 
 - `data/gateway-config.json`
 - `data/chat-config.json`
 - `data/session.json`
-
-但新项目建议优先使用 `data/account-pool.toml`。
 
 ## Project Structure
 
 ```text
 .
 ├── data/
-│   ├── account-pool.toml
-│   ├── account-usage.json
-│   └── history.json
+│   └── account-pool.example.toml
+├── docs/
 ├── src/
 │   ├── cli.mjs
 │   ├── gateway.mjs
@@ -253,25 +239,30 @@ active_account = "fineres-primary"
 │   └── tools/
 ├── test/
 ├── cc-topology-ascii.md
-└── README.md
+├── README.md
+└── README.zh-CN.md
 ```
 
 ## Development
 
-运行测试：
+Run tests:
 
 ```bash
 npm test
 ```
 
-可用脚本：
+Available scripts:
 
-- `npm start`：启动终端聊天页
-- `npm run start:gateway`：启动 Anthropic 兼容网关
-- `npm test`：运行测试
+- `npm start`: start the terminal chat client
+- `npm run start:gateway`: start the Anthropic-compatible gateway
+- `npm test`: run the test suite
 
-## Notes
+## Security Notes
 
-- `data/account-pool.toml` 中包含真实会话头，不应该提交到公共仓库
-- 建议把示例配置和本地私有配置分开管理
-- 当前实现偏向稳定、直接和易于调试，不依赖外部框架
+- never commit real session headers
+- keep your private runtime config only inside ignored local files under `data/`
+- treat this repository as an experiment, not a managed integration boundary
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](./LICENSE).

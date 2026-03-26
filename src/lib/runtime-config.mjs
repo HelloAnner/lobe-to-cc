@@ -20,6 +20,27 @@ function normalizeThinking(chat) {
   };
 }
 
+export function applyRuntimeEnvOverrides(runtime, env = process.env) {
+  const gatewayConfig = { ...runtime.gatewayConfig };
+
+  if (env.LOBE_GATEWAY_HOST) {
+    gatewayConfig.host = env.LOBE_GATEWAY_HOST;
+  }
+
+  if (env.LOBE_GATEWAY_PORT) {
+    gatewayConfig.port = Number(env.LOBE_GATEWAY_PORT);
+  }
+
+  if (env.LOBE_GATEWAY_AUTH_TOKEN) {
+    gatewayConfig.authToken = env.LOBE_GATEWAY_AUTH_TOKEN;
+  }
+
+  return {
+    ...runtime,
+    gatewayConfig
+  };
+}
+
 export function deriveRuntimeFromAccountPool(config) {
   const accounts = config.accounts ?? [];
   const activeAccount = selectActiveAccount({
@@ -125,8 +146,8 @@ export async function loadRuntimeConfig() {
   const tomlRuntime = await loadTomlAccountPool();
 
   if (tomlRuntime) {
-    return tomlRuntime;
+    return applyRuntimeEnvOverrides(tomlRuntime);
   }
 
-  return loadLegacyJsonConfig();
+  return applyRuntimeEnvOverrides(await loadLegacyJsonConfig());
 }

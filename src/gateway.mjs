@@ -12,7 +12,12 @@ import { createSseParser } from './lib/sse-parser.mjs';
 import { translateAnthropicRequestToLobe } from './lib/anthropic-to-lobe.mjs';
 import { createAnthropicEventTransformer } from './lib/lobe-to-anthropic-stream.mjs';
 import { isAuthorizedRequest } from './lib/gateway-auth.mjs';
-import { createAccountRouter, buildConversationKey } from './lib/account-routing.mjs';
+import {
+  createAccountRouter,
+  buildConversationKey,
+  evaluateAccountAvailability
+} from './lib/account-routing.mjs';
+import { renderAdminPage } from './lib/admin-page.mjs';
 import {
   loadAccountUsageState,
   saveAccountUsageState,
@@ -24,7 +29,11 @@ import {
   loadAccountPoolDocument,
   deriveRuntimeForAccount
 } from './lib/runtime-config.mjs';
-import { persistPoolStateInToml } from './lib/account-pool-manager.mjs';
+import {
+  persistPoolStateInToml,
+  upsertAccountByIdentityInToml
+} from './lib/account-pool-manager.mjs';
+import { extractSessionAndIdentityFromHar } from './lib/har-session-parser.mjs';
 
 function resolveDataPath(relativePath) {
   return path.resolve(process.cwd(), relativePath);
@@ -51,6 +60,13 @@ function writeJson(response, statusCode, payload) {
     'Content-Type': 'application/json; charset=utf-8'
   });
   response.end(`${JSON.stringify(payload)}\n`);
+}
+
+function writeHtml(response, statusCode, html) {
+  response.writeHead(statusCode, {
+    'Content-Type': 'text/html; charset=utf-8'
+  });
+  response.end(html);
 }
 
 function unauthorized(response) {
@@ -302,12 +318,98 @@ function buildModelDetail(gatewayConfig, id) {
 }
 
 function buildDebugAccountsPayload(runtimeConfig, usageState) {
+  const accountPool = runtimeConfig.accountPool ?? {};
+  const accounts = accountPool.accounts ?? [];
+  const now = new Date().toISOString();
+
   return {
     gateway: runtimeConfig.gatewayConfig,
-    pool: runtimeConfig.accountPool?.pool ?? {},
-    accounts: runtimeConfig.accountPool?.accounts ?? [],
+    pool: accountPool.pool ?? {},
+    accounts: accounts.map((account) => {
+      const availability = evaluateAccountAvailability(account, accountPool, usageState, now);
+
+      return {
+        ...account,
+        available: availability.available,
+        unavailable_reason: availability.reason
+      };
+    }),
     usage: usageState
   };
+}
+
+async function handleAdminState(response, runtime) {
+  const usageState = await loadAccountUsageState();
+  const accountPool = (await loadAccountPoolDocument())?.config ?? null;
+  writeJson(response, 200, buildDebugAccountsPayload({
+    ...runtime,
+    accountPool
+  }, usageState));
+}
+
+async function handleAdminConfigGet(response) {
+  const accountPoolDocument = await loadAccountPoolDocument();
+  writeJson(response, 200, {
+    content: accountPoolDocument?.content ?? ''
+  });
+}
+
+async function handleAdminConfigSave(request, response) {
+  const rawBody = await readRequestBody(request);
+  const payload = JSON.parse(rawBody || '{}');
+  const accountPoolDocument = await loadAccountPoolDocument();
+  const targetPath = accountPoolDocument?.filePath ?? resolveDataPath('data/account-pool.toml');
+  await writeFile(targetPath, payload.content ?? '', 'utf8');
+  writeJson(response, 200, {
+    message: '配置已保存'
+  });
+}
+
+async function handleAdminSavePool(request, response) {
+  const rawBody = await readRequestBody(request);
+  const payload = JSON.parse(rawBody || '{}');
+  const accountPoolDocument = await loadAccountPoolDocument();
+
+  if (!accountPoolDocument) {
+    writeJson(response, 400, { message: '未找到 account-pool.toml' });
+    return;
+  }
+
+  accountPoolDocument.config.pool = accountPoolDocument.config.pool ?? {};
+  accountPoolDocument.config.pool.strategy = payload.strategy ?? accountPoolDocument.config.pool.strategy;
+  accountPoolDocument.config.pool.active_account = payload.activeAccount ?? accountPoolDocument.config.pool.active_account;
+
+  const updated = persistPoolStateInToml(accountPoolDocument.content, accountPoolDocument.config.pool);
+  await writeFile(accountPoolDocument.filePath, updated, 'utf8');
+
+  writeJson(response, 200, {
+    message: '池配置已保存'
+  });
+}
+
+async function handleAdminImportHar(request, response) {
+  const rawBody = await readRequestBody(request);
+  const payload = JSON.parse(rawBody || '{}');
+  const har = JSON.parse(payload.harText ?? '{}');
+  const extracted = extractSessionAndIdentityFromHar(har);
+  const accountPoolDocument = await loadAccountPoolDocument();
+
+  if (!accountPoolDocument) {
+    writeJson(response, 400, { message: '未找到 account-pool.toml' });
+    return;
+  }
+
+  const updated = upsertAccountByIdentityInToml(accountPoolDocument.content, {
+    suggestedName: payload.suggestedName ?? 'imported-account',
+    identity: extracted.identity,
+    session: extracted.session
+  });
+
+  await writeFile(accountPoolDocument.filePath, updated, 'utf8');
+
+  writeJson(response, 200, {
+    message: `已导入账号: ${payload.suggestedName ?? 'imported-account'}`
+  });
 }
 
 function createServer() {
@@ -320,6 +422,36 @@ function createServer() {
 
       if (request.method === 'GET' && url.pathname === '/health') {
         writeJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/admin') {
+        writeHtml(response, 200, renderAdminPage());
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/admin/state') {
+        await handleAdminState(response, runtime);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/admin/config') {
+        await handleAdminConfigGet(response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/admin/config') {
+        await handleAdminConfigSave(request, response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/admin/save-pool') {
+        await handleAdminSavePool(request, response);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/admin/import-har') {
+        await handleAdminImportHar(request, response);
         return;
       }
 
